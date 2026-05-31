@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zen IMU - Cozy Space</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: linear-gradient(135deg, #e0eafc 0%, #cfdef3 100%);
+      font-family: 'Quicksand', sans-serif;
+    }
+
+    #ui {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #556080;
+      background: rgba(255, 255, 255, 0.65);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      padding: 14px 28px;
+      border-radius: 24px;
+      box-shadow: 0 8px 32px rgba(31, 38, 135, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      pointer-events: none;
+      text-align: center;
+      min-width: 200px;
+      transition: all 0.3s ease;
+      font-size: 0.95rem;
+      letter-spacing: 0.5px;
+    }
+
+    .value-group {
+      display: flex;
+      justify-content: space-around;
+      margin-top: 6px;
+      gap: 12px;
+    }
+
+    .value-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .value-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      opacity: 0.6;
+      font-weight: 600;
+    }
+
+    .value-num {
+      font-weight: 600;
+      color: #3a4766;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="ui">
+    Odaya bağlanılıyor...
+  </div>
+
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <script type="module">
+
+    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js";
+
+    // ================= CUSTOM ROUNDED BOX GEOMETRY INTERNAL FUNCTION =================
+    function createRoundedBoxGeometry(width = 1, height = 1, depth = 1, segments = 2, radius = 0.1) {
+      const geometry = new THREE.BoxGeometry(width, height, depth, segments, segments, segments);
+      const positionAttribute = geometry.attributes.position;
+      const normalAttribute = geometry.attributes.normal;
+
+      const minX = -width / 2 + radius;
+      const maxX = width / 2 - radius;
+      const minY = -height / 2 + radius;
+      const maxY = height / 2 - radius;
+      const minZ = -depth / 2 + radius;
+      const maxZ = depth / 2 - radius;
+
+      for (let i = 0; i < positionAttribute.count; i++) {
+        let x = positionAttribute.getX(i);
+        let y = positionAttribute.getY(i);
+        let z = positionAttribute.getZ(i);
+
+        let cx = x < minX ? minX : (x > maxX ? maxX : x);
+        let cy = y < minY ? minY : (y > maxY ? maxY : y);
+        let cz = z < minZ ? minZ : (z > maxZ ? maxZ : z);
+
+        const normal = new THREE.Vector3(x - cx, y - cy, z - cz).normalize();
+
+        x = cx + normal.x * radius;
+        y = cy + normal.y * radius;
+        z = cz + normal.z * radius;
+
+        positionAttribute.setXYZ(i, x, y, z);
+        normalAttribute.setXYZ(i, normal.x, normal.y, normal.z);
+      }
+
+      geometry.computeVertexNormals();
+      return geometry;
+    }
+
+    // ================= MQTT =================
+    const client = mqtt.connect(
+      "wss://f1816010c8504a99a9798e2d37f7cc41.s1.eu.hivemq.cloud:8884/mqtt",
+      {
+        username: "esp32",
+        password: "Ra123@Ra123",
+        reconnectPeriod: 1000,
+        connectTimeout: 10000
+      }
+    );
+
+    // ================= THREE =================
+    const scene = new THREE.Scene();
+
+    const baseFOV = 40;
+    const camera = new THREE.PerspectiveCamera(baseFOV, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 5.5);
+
+    // Ekran kartı performansını maksimize etmek için powerPreference eklendi
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: "high-performance"
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    // ================= DİNAMİK KAMERA ÖLÇEKLENDİRME FONKSİYONU =================
+    function fitCameraToScreen() {
+      const aspect = window.innerWidth / window.innerHeight;
+      if (aspect < 1) {
+        camera.fov = baseFOV / aspect;
+      } else {
+        camera.fov = baseFOV;
+      }
+      camera.aspect = aspect;
+      camera.updateProjectionMatrix();
+    }
+
+    fitCameraToScreen();
+
+    // ================= IŞIKLANDIRMA (Yumuşak & Sıcak) =================
+    const ambientLight = new THREE.AmbientLight(0xfff9f2, 1.4);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
+    dirLight.position.set(4, 5, 3);
+    scene.add(dirLight);
+
+    const rimLight = new THREE.DirectionalLight(0xd4e2fc, 0.8);
+    rimLight.position.set(-4, -3, -2);
+    scene.add(rimLight);
+
+    // ================= SOFT & YUVARLAK KÜP =================
+    const geometry = createRoundedBoxGeometry(1.8, 1.8, 1.8, 16, 0.22);
+
+    const materials = [
+      new THREE.MeshPhysicalMaterial({ color: 0xff3b60, roughness: 0.25, metalness: 0.0, clearcoat: 0.4, clearcoatRoughness: 0.1 }),
+      new THREE.MeshPhysicalMaterial({ color: 0x00f5d4, roughness: 0.25, metalness: 0.0, clearcoat: 0.4, clearcoatRoughness: 0.1 }),
+      new THREE.MeshPhysicalMaterial({ color: 0x00bbf9, roughness: 0.25, metalness: 0.0, clearcoat: 0.4, clearcoatRoughness: 0.1 }),
+      new THREE.MeshPhysicalMaterial({ color: 0xfee440, roughness: 0.25, metalness: 0.0, clearcoat: 0.4, clearcoatRoughness: 0.1 }),
+      new THREE.MeshPhysicalMaterial({ color: 0x9b5de5, roughness: 0.25, metalness: 0.0, clearcoat: 0.4, clearcoatRoughness: 0.1 }),
+      new THREE.MeshPhysicalMaterial({ color: 0xff7043, roughness: 0.25, metalness: 0.0, clearcoat: 0.4, clearcoatRoughness: 0.1 })
+    ];
+
+    const cube = new THREE.Mesh(geometry, materials);
+    scene.add(cube);
+
+    const pivotGroup = new THREE.Group();
+    scene.add(pivotGroup);
+    pivotGroup.add(cube);
+
+    // ================= STATEf & TIMING (Pürüzsüz Akış Ayarları) =================
+    let targetQuat = new THREE.Quaternion();
+    let currentQuat = new THREE.Quaternion();
+
+    const clock = new THREE.Clock();
+
+    // Takılmaları önlemek ve kare hızından bağımsız kararlı çalışmak için optimize edildi
+    const LERP_SPEED = 22;
+
+    let lastRoll = 0, lastPitch = 0, lastYaw = 0;
+    // Jitter (titreme) ve takılmayı engellemek için ideal dengeli filtre katsayısı
+    const FILTER_K = 0.50;
+
+    // ================= UI UPDATE FUNCTION =================
+    const ui = document.getElementById("ui");
+
+    function updateUI(status, r = 0, p = 0, y = 0, hasData = false) {
+      if (!hasData) {
+        ui.innerHTML = `<span>${status}</span>`;
+      } else {
+        ui.innerHTML = `
+          <div class="value-group">
+            <div class="value-item"><span class="value-label">Roll</span><span class="value-num">${r.toFixed(1)}°</span></div>
+            <div class="value-item"><span class="value-label">Pitch</span><span class="value-num">${p.toFixed(1)}°</span></div>
+            <div class="value-item"><span class="value-label">Yaw</span><span class="value-num">${y.toFixed(1)}°</span></div>
+          </div>
+        `;
+      }
+    }
+
+    // ================= MQTT EVENTS =================
+    client.on("connect", () => {
+      updateUI("Bağlandı 🍃 Veri bekleniyor...");
+      client.subscribe("/imu/data");
+    });
+
+    client.on("error", (err) => {
+      updateUI("Bağlantıda küçük bir sorun var ⛈️");
+    });
+
+    client.on("message", (topic, payload) => {
+      try {
+        const d = JSON.parse(payload.toString());
+
+        // ================= DÜZELTİLEN KISIM: ROLL VE PITCH TERS ÇEVRİLDİ =================
+        const rawRoll = Number(d.roll) || 0;      // Eksiyi kaldırdık (Yönü tersine döndü)
+        const rawPitch = -(Number(d.pitch) || 0); // Başına eksi koyduk (Yönü tersine döndü)
+        const rawYaw = Number(d.yaw) || 0;        // Standart akışına bırakıldı
+
+        // Low-pass filtreleme aşaması (Aynen kalıyor)
+        const roll = lastRoll + FILTER_K * (rawRoll - lastRoll);
+        const pitch = lastPitch + FILTER_K * (rawPitch - lastPitch);
+        const yaw = lastYaw + FILTER_K * (rawYaw - lastYaw);
+
+        lastRoll = roll;
+        lastPitch = pitch;
+        lastYaw = yaw;
+
+        const euler = new THREE.Euler(
+          THREE.MathUtils.degToRad(pitch),
+          THREE.MathUtils.degToRad(yaw),
+          THREE.MathUtils.degToRad(roll),
+          "YXZ"
+        );
+
+        targetQuat.setFromEuler(euler);
+        updateUI("", roll, pitch, yaw, true);
+
+      } catch (err) {
+        console.error("JSON Parse Error:", err);
+      }
+    });
+
+    // ================= ANIMATION =================
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const deltaTime = Math.min(clock.getDelta(), 0.1); // Aşırı FPS düşüşlerinde fırlamayı önleme guard'ı
+      const elapsedTime = clock.getElapsedTime();
+
+      // Zaman tabanlı hassas slerp faktörü hesabı (Takılmaları tamamen önler)
+      const slerpFactor = 1.0 - Math.exp(-LERP_SPEED * deltaTime);
+      currentQuat.slerp(targetQuat, slerpFactor);
+      cube.quaternion.copy(currentQuat);
+
+      // CHILL IDLE EFFECT
+      pivotGroup.position.y = Math.sin(elapsedTime * 1.5) * 0.08;
+
+      renderer.render(scene, camera);
+    }
+
+    clock.getDelta();
+    animate();
+
+    // ================= RESIZE =================
+    window.addEventListener("resize", () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      fitCameraToScreen();
+    });
+
+  </script>
+
+</body>
+
+</html>
