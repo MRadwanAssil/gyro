@@ -220,12 +220,12 @@
 
     // ================= MQTT EVENTS =================
     client.on("connect", () => {
-      updateUI("Bağlandı 🍃 Veri bekleniyor...");
+      updateUI("Bağlandi, Veri bekleniyor...");
       client.subscribe("/imu/data");
     });
 
     client.on("error", (err) => {
-      updateUI("Bağlantıda küçük bir sorun var ⛈️");
+      updateUI("Bağlantıda küçük bir sorun var :()");
     });
 
     client.on("message", (topic, payload) => {
